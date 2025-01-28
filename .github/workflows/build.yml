@@ -1,7 +1,10 @@
 name: Build
 
 on:
-  branches: [ "main" ]
+  pull:
+    branches: [ "main" ]
+    tags:
+      - "*"
   pull_request:
     branches: [ "main" ]
     tags:
