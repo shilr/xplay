@@ -1,11 +1,11 @@
 package com.github.jsbxyyx.xbook;
 
+import android.content.Intent;
 import android.os.Bundle;
-import android.text.TextUtils;
 import android.view.View;
 import android.widget.ImageView;
+import android.widget.ListView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -17,13 +17,15 @@ import com.github.jsbxyyx.xbook.common.JsonUtil;
 import com.github.jsbxyyx.xbook.common.LogUtil;
 import com.github.jsbxyyx.xbook.common.ProgressListener;
 import com.github.jsbxyyx.xbook.common.SPUtils;
-import com.github.jsbxyyx.xbook.data.bean.Book;
+import com.github.jsbxyyx.xbook.common.UiUtils;
 import com.github.jsbxyyx.xbook.data.BookDbHelper;
 import com.github.jsbxyyx.xbook.data.BookNetHelper;
+import com.github.jsbxyyx.xbook.data.bean.Book;
 import com.squareup.picasso.Picasso;
 
 import java.io.File;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -36,6 +38,10 @@ public class DetailActivity extends AppCompatActivity {
     private BookNetHelper bookNetHelper;
     private BookDbHelper bookDbHelper;
 
+    private ListView lv_detail_suggest;
+    private ListBookAdapter lvListAdapter;
+
+    private String detailUrl;
     private Book mBook;
 
     public DetailActivity() {
@@ -49,9 +55,9 @@ public class DetailActivity extends AppCompatActivity {
 
         bookDbHelper = new BookDbHelper(this);
 
-        String detailUrl = getIntent().getStringExtra("detailUrl");
+        detailUrl = getIntent().getStringExtra("detailUrl");
         if (Common.isEmpty(detailUrl)) {
-            Toast.makeText(getBaseContext(), "书籍地址为空", Toast.LENGTH_LONG).show();
+            UiUtils.showToast("书籍地址为空");
             return;
         }
 
@@ -69,6 +75,12 @@ public class DetailActivity extends AppCompatActivity {
         bookNetHelper.detail(detailUrl, new DataCallback<Book>() {
             @Override
             public void call(Book book, Throwable err) {
+                if (err != null) {
+                    runOnUiThread(() -> {
+                        UiUtils.showToast("获取书籍详情失败:" + err.getMessage());
+                    });
+                    return;
+                }
                 loading.dismiss();
                 LogUtil.d(TAG, "call: %s", book);
                 mBook = book;
@@ -85,18 +97,46 @@ public class DetailActivity extends AppCompatActivity {
             }
         });
 
+        lv_detail_suggest = findViewById(R.id.lv_detail_suggest);
+        lvListAdapter = new ListBookAdapter(this, null);
+        lv_detail_suggest.setAdapter(lvListAdapter);
+        lv_detail_suggest.setOnItemClickListener((parent, view1, position, id) -> {
+            Book t = (Book) lv_detail_suggest.getAdapter().getItem(position);
+            LogUtil.d(TAG, "lv_detail_suggest: setOnItemClickListener: %s", t);
+            Intent intent = new Intent(this, DetailActivity.class);
+            intent.putExtra("detailUrl", t.getDetailUrl());
+            startActivity(intent);
+        });
+        bookNetHelper.detailSuggest(detailUrl, new DataCallback<List<Book>>() {
+            @Override
+            public void call(List<Book> list, Throwable err) {
+                runOnUiThread(() -> {
+                    if (err != null) {
+                        UiUtils.showToast("获取推荐书籍失败:" + err.getMessage());
+                        return;
+                    }
+                    LogUtil.d(TAG, "suggest size : %s", list.size());
+                    lvListAdapter.getDataList().clear();
+                    lvListAdapter.getDataList().addAll(list);
+                    lvListAdapter.notifyDataSetChanged();
+                    UiUtils.setListViewHeightBasedOnChildren(lv_detail_suggest);
+                });
+            }
+        });
+
         findViewById(R.id.btn_detail_download).setOnClickListener(v -> {
-            String downloadUrl = mBook.getDownloadUrl();
-            if (Common.isEmpty(downloadUrl)) {
-                Toast.makeText(getBaseContext(), "下载地址为空，请登录", Toast.LENGTH_LONG).show();
+            if (mBook == null || Common.isEmpty(mBook.getDownloadUrl())) {
+                UiUtils.showToast("下载地址为空，请登录");
                 return;
             }
-            bookNetHelper.download(downloadUrl, Common.xbook_dir, mBook.getBid(), new DataCallback<File>() {
+            tv_download_progress.setVisibility(View.VISIBLE);
+            tv_download_progress.setText("开始下载...");
+            bookNetHelper.downloadWithMagic(mBook.getDownloadUrl(), Common.xbook_dir, mBook.getBid(), new DataCallback<File>() {
                 @Override
                 public void call(File file, Throwable err) {
                     if (err != null) {
                         runOnUiThread(() -> {
-                            Toast.makeText(getBaseContext(), "err:" + err.getMessage(), Toast.LENGTH_LONG).show();
+                            UiUtils.showToast("书籍下载失败:" + err.getMessage());
                         });
                         return;
                     }
@@ -110,21 +150,27 @@ public class DetailActivity extends AppCompatActivity {
                         mBook.setId(IdUtil.nextId());
                         bookDbHelper.insertBook(mBook);
                         String sync_data = SPUtils.getData(getBaseContext(), Common.sync_key);
-                        if (Common.sync_key_checked.equals(sync_data)) {
+                        if (Common.checked.equals(sync_data)) {
                             bookNetHelper.cloudSync(bookDbHelper.findBookByBid(mBook.getBid()), new DataCallback<JsonNode>() {
                                 @Override
                                 public void call(JsonNode o, Throwable err) {
+                                    if (err != null) {
+                                        runOnUiThread(() -> {
+                                            UiUtils.showToast("同步失败:" + err.getMessage());
+                                        });
+                                        return;
+                                    }
+
+                                    String sha = o.get("data").get("sha").asText();
+                                    Book book_db = bookDbHelper.findBookById(mBook.getId() + "");
+                                    if (book_db != null) {
+                                        book_db.putRemarkProperty("sha", sha);
+                                        bookDbHelper.updateBook(book_db);
+                                    }
+
                                     runOnUiThread(() -> {
-                                        if (err != null) {
-                                            Toast.makeText(getBaseContext(), "同步失败", Toast.LENGTH_LONG).show();
-                                            return;
-                                        }
-                                        String sha = o.get("data").get("sha").asText();
-                                        Book book_db = bookDbHelper.findBookById(mBook.getId() + "");
                                         if (book_db != null) {
-                                            book_db.putRemarkProperty("sha", sha);
-                                            bookDbHelper.updateBook(book_db);
-                                            Toast.makeText(getBaseContext(), "同步成功", Toast.LENGTH_LONG).show();
+                                            UiUtils.showToast("同步成功");
                                         }
                                     });
                                 }
@@ -132,7 +178,7 @@ public class DetailActivity extends AppCompatActivity {
                         }
                     }
                     runOnUiThread(() -> {
-                        Toast.makeText(getBaseContext(), "下载成功", Toast.LENGTH_LONG).show();
+                        UiUtils.showToast("下载成功");
                     });
                 }
             }, new ProgressListener() {
@@ -143,7 +189,7 @@ public class DetailActivity extends AppCompatActivity {
                         tv_download_progress.setText(String.format("下载进度：%.1f%%", bytesRead * 1.0 / contentLength * 100));
                     });
                 }
-            });
+            }, Common.MAGIC);
         });
     }
 }

@@ -6,9 +6,14 @@ import com.github.jsbxyyx.xbook.BuildConfig;
 
 /**
  * @author jsbxyyx
- * @since 1.0
  */
 public class LogUtil {
+
+    private static boolean enable = true;
+
+    public static void setEnable(boolean enable_) {
+        enable = enable_;
+    }
 
     public static void v(String tag, String format, Object... args) {
         if (BuildConfig.DEBUG) {
@@ -18,7 +23,11 @@ public class LogUtil {
             if (format == null) {
                 format = "";
             }
-            Log.v(tag, String.format(format, args));
+            if (enable) {
+                Log.v(tag, String.format(format, args));
+            } else {
+                System.out.println(tag + " " + String.format(format, args));
+            }
         }
     }
 
@@ -30,7 +39,11 @@ public class LogUtil {
             if (format == null) {
                 format = "";
             }
-            Log.d(tag, String.format(format, args));
+            if (enable) {
+                Log.d(tag, String.format(format, args));
+            } else {
+                System.out.println(tag + " " + String.format(format, args));
+            }
         }
     }
 
@@ -41,7 +54,11 @@ public class LogUtil {
         if (format == null) {
             format = "";
         }
-        Log.i(tag, String.format(format, args));
+        if (enable) {
+            Log.i(tag, String.format(format, args));
+        } else {
+            System.out.println(tag + " " + String.format(format, args));
+        }
     }
 
     public static void w(String tag, String format, Object... args) {
@@ -51,7 +68,11 @@ public class LogUtil {
         if (format == null) {
             format = "";
         }
-        Log.w(tag, String.format(format, args));
+        if (enable) {
+            Log.w(tag, String.format(format, args));
+        } else {
+            System.out.println(tag + " " + String.format(format, args));
+        }
     }
 
     public static void e(String tag, String format, Object... args) {
@@ -61,7 +82,11 @@ public class LogUtil {
         if (format == null) {
             format = "";
         }
-        Log.e(tag, String.format(format, args));
+        if (enable) {
+            Log.e(tag, String.format(format, args));
+        } else {
+            System.out.println(tag + " " + String.format(format, args));
+        }
     }
 
     public static String getStackTraceString(Throwable tr) {

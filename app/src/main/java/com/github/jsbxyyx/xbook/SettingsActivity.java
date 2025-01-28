@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -14,7 +15,6 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.NotificationCompat;
@@ -26,9 +26,12 @@ import com.github.jsbxyyx.xbook.common.DataCallback;
 import com.github.jsbxyyx.xbook.common.LogUtil;
 import com.github.jsbxyyx.xbook.common.ProgressListener;
 import com.github.jsbxyyx.xbook.common.SPUtils;
+import com.github.jsbxyyx.xbook.common.UiUtils;
 import com.github.jsbxyyx.xbook.data.BookNetHelper;
 
 import java.io.File;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * @author jsbxyyx
@@ -39,6 +42,16 @@ public class SettingsActivity extends AppCompatActivity {
     private NotificationManager notificationManager;
     private NotificationCompat.Builder builder;
     private String downloadUrl;
+
+    private static String[] clearKeys = new String[]{
+            Common.profile_nickname_key,
+            Common.profile_email_key,
+            Common.search_ext_key,
+            Common.search_language_key,
+            Common.sync_key,
+            Common.reader_image_show_key,
+            Common.online_read_key,
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,38 +84,63 @@ public class SettingsActivity extends AppCompatActivity {
             PackageInfo packageInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
             tv_version.setText(packageInfo.versionName);
         } catch (PackageManager.NameNotFoundException e) {
-            throw new RuntimeException(e);
+            LogUtil.e(getClass().getSimpleName(), "获取版本失败", e);
+            UiUtils.showToast("获取版本失败");
         }
 
         Button btn_update = findViewById(R.id.btn_update);
         btn_update.setOnClickListener((v) -> {
             runOnUiThread(() -> {
                 notificationManager.notify(0, builder.build());
-                Toast.makeText(context, "开始下载", Toast.LENGTH_LONG).show();
+                UiUtils.showToast("开始下载");
             });
             if (Common.isEmpty(downloadUrl)) {
-                Toast.makeText(context, "已经是最新版本", Toast.LENGTH_LONG).show();
+                UiUtils.showToast("已经是最新版本");
             } else {
-                bookNetHelper.downloadWithCookie(downloadUrl, Common.sdcard, "", "", new DataCallback<File>() {
+                bookNetHelper.downloadApk(downloadUrl, new DataCallback<File>() {
                     @Override
                     public void call(File file, Throwable err) {
                         if (err != null) {
                             runOnUiThread(() -> {
-                                Toast.makeText(context, "下载失败", Toast.LENGTH_LONG).show();
+                                UiUtils.showToast("下载失败:" + err.getMessage());
                             });
                             return;
                         }
                         LogUtil.d(getClass().getSimpleName(), "下载成功，开始安装");
+                        runOnUiThread(() -> {
+                            UiUtils.showToast("下载成功，开始安装");
+                        });
+                        Common.sleep(3000);
                         Intent install = new Intent(Intent.ACTION_VIEW);
                         install.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        Uri uri;
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            install.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                            Uri contentUri = FileProvider.getUriForFile(context, context.getPackageName() + ".fileProvider", file);
-                            install.setDataAndType(contentUri, "application/vnd.android.package-archive");
+                            uri = FileProvider.getUriForFile(
+                                    context,
+                                    context.getPackageName() + ".fileProvider",
+                                    file
+                            );
+                            install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            install.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
                         } else {
-                            install.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
+                            uri = Uri.fromFile(file);
                         }
-                        context.startActivity(install);
+                        install.setDataAndType(uri, "application/vnd.android.package-archive");
+                        List<ResolveInfo> resInfoList = context.getPackageManager()
+                                .queryIntentActivities(
+                                        install,
+                                        PackageManager.MATCH_DEFAULT_ONLY
+                                );
+                        for (ResolveInfo resolveInfo : resInfoList) {
+                            String packageName = resolveInfo.activityInfo.packageName;
+                            int modeFlags = Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION;
+                            getApplicationContext().grantUriPermission(
+                                    packageName,
+                                    uri,
+                                    modeFlags
+                            );
+                        }
+                        getApplicationContext().startActivity(install);
                     }
                 }, new ProgressListener() {
                     @Override
@@ -126,6 +164,9 @@ public class SettingsActivity extends AppCompatActivity {
             public void call(JsonNode jsonNode, Throwable err) {
                 if (err != null) {
                     LogUtil.d(getClass().getSimpleName(), "%s", LogUtil.getStackTraceString(err));
+                    runOnUiThread(() -> {
+                        UiUtils.showToast("获取版本更新失败:" + err.getMessage());
+                    });
                     return;
                 }
                 JsonNode data = jsonNode.get("data");
@@ -213,7 +254,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         String sync_data = SPUtils.getData(getBaseContext(), Common.sync_key);
         CheckBox cb_sync = findViewById(R.id.cb_sync);
-        if (Common.sync_key_checked.equals(sync_data)) {
+        if (Common.checked.equals(sync_data)) {
             cb_sync.setChecked(true);
         } else {
             cb_sync.setChecked(false);
@@ -221,13 +262,54 @@ public class SettingsActivity extends AppCompatActivity {
         cb_sync.setOnClickListener((v) -> {
             CheckBox cb = (CheckBox) v;
             if (cb.isChecked()) {
-                SPUtils.putData(getBaseContext(), Common.sync_key, Common.sync_key_checked);
+                SPUtils.putData(getBaseContext(), Common.sync_key, Common.checked);
             } else {
-                SPUtils.putData(getBaseContext(), Common.sync_key, Common.sync_key_unchecked);
+                SPUtils.putData(getBaseContext(), Common.sync_key, Common.unchecked);
             }
             LogUtil.d(getClass().getSimpleName(), "sync checked : %s", cb.isChecked());
         });
 
+        String reader_image_show_data = SPUtils.getData(getBaseContext(), Common.reader_image_show_key, Common.checked);
+        CheckBox cb_show_image = findViewById(R.id.cb_show_image);
+        if (Common.checked.equals(reader_image_show_data)) {
+            cb_show_image.setChecked(true);
+        } else {
+            cb_show_image.setChecked(false);
+        }
+        cb_show_image.setOnClickListener((v) -> {
+            CheckBox cb = (CheckBox) v;
+            if (cb.isChecked()) {
+                SPUtils.putData(getBaseContext(), Common.reader_image_show_key, Common.checked);
+            } else {
+                SPUtils.putData(getBaseContext(), Common.reader_image_show_key, Common.unchecked);
+            }
+            LogUtil.d(getClass().getSimpleName(), "reader image show checked : %s", cb.isChecked());
+        });
+
+        String online_read_data = SPUtils.getData(getBaseContext(), Common.online_read_key, Common.unchecked);
+        CheckBox cb_online_read = findViewById(R.id.cb_online_read);
+        if (Common.checked.equals(online_read_data)) {
+            cb_online_read.setChecked(true);
+        } else {
+            cb_online_read.setChecked(false);
+        }
+        cb_online_read.setOnClickListener((v) -> {
+            CheckBox cb = (CheckBox) v;
+            if (cb.isChecked()) {
+                SPUtils.putData(getBaseContext(), Common.online_read_key, Common.checked);
+            } else {
+                SPUtils.putData(getBaseContext(), Common.online_read_key, Common.unchecked);
+            }
+            LogUtil.d(getClass().getSimpleName(), "online read checked : %s", cb.isChecked());
+        });
+
+        Button btn_clear_settings = findViewById(R.id.btn_clear_settings);
+        btn_clear_settings.setOnClickListener((v) -> {
+            for (String key : clearKeys) {
+                SPUtils.putData(this, key, "");
+            }
+            LogUtil.i(getClass().getSimpleName(), "clear settings : %s", Arrays.toString(clearKeys));
+        });
     }
 
     public void setDownloadUrl(String downloadUrl) {

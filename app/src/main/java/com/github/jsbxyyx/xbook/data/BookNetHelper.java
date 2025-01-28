@@ -1,7 +1,7 @@
 package com.github.jsbxyyx.xbook.data;
 
-import static com.github.jsbxyyx.xbook.common.Common.xburl;
-import static com.github.jsbxyyx.xbook.common.Common.xurl;
+import static com.github.jsbxyyx.xbook.common.Common.getXurl;
+import static com.github.jsbxyyx.xbook.common.Common.getXburl;
 import static com.github.jsbxyyx.xbook.common.Common.zurl;
 
 import androidx.annotation.NonNull;
@@ -16,6 +16,7 @@ import com.github.jsbxyyx.xbook.common.JsonUtil;
 import com.github.jsbxyyx.xbook.common.LogUtil;
 import com.github.jsbxyyx.xbook.common.ProgressListener;
 import com.github.jsbxyyx.xbook.common.SessionManager;
+import com.github.jsbxyyx.xbook.common.UiUtils;
 import com.github.jsbxyyx.xbook.data.bean.Book;
 import com.github.jsbxyyx.xbook.data.bean.MLog;
 import com.github.jsbxyyx.xbook.data.bean.Profile;
@@ -25,6 +26,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -33,12 +35,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
@@ -48,18 +48,6 @@ import okhttp3.Response;
  * @since 1.0
  */
 public class BookNetHelper {
-
-    private OkHttpClient client = new OkHttpClient.Builder()
-            .connectTimeout(5000, TimeUnit.MILLISECONDS)
-            .readTimeout(30000, TimeUnit.MILLISECONDS)
-            .writeTimeout(30000, TimeUnit.MILLISECONDS)
-            .build();
-
-    private OkHttpClient syncClient = new OkHttpClient.Builder()
-            .connectTimeout(60000, TimeUnit.MILLISECONDS)
-            .readTimeout(3600000, TimeUnit.MILLISECONDS)
-            .writeTimeout(3600000, TimeUnit.MILLISECONDS)
-            .build();
 
     private String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
     private String content_type_key = "content-type";
@@ -76,6 +64,7 @@ public class BookNetHelper {
 
         Map<String, Object> headers = new HashMap<>();
         headers.put("User-Agent", userAgent);
+        headers.put(cookie_key, SessionManager.getSession());
         object.put("headers", headers);
 
         List<Object> params = new ArrayList<>();
@@ -102,12 +91,12 @@ public class BookNetHelper {
         object.put("params", params);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "search request: %s", s);
-        Request request = new Request.Builder()
-                .url(xurl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        client.newCall(request).enqueue(new Callback() {
+        LogUtil.d(TAG, "search request: %s : %s", reqUrl, s);
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -117,7 +106,7 @@ public class BookNetHelper {
             @Override
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
-                    dataCallback.call(new ArrayList<>(), new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(new ArrayList<>(), new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -126,7 +115,7 @@ public class BookNetHelper {
                     JsonNode jsonObject = JsonUtil.readTree(string);
                     int status = jsonObject.get("status").asInt();
                     if (!Common.statusSuccessful(status)) {
-                        dataCallback.call(new ArrayList<>(), new HttpStatusException(status + "", status, reqUrl));
+                        dataCallback.call(new ArrayList<>(), new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                         return;
                     }
                     JsonNode data = jsonObject.get("data");
@@ -156,13 +145,13 @@ public class BookNetHelper {
         object.put("params", params);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "detail request: %s", s);
+        LogUtil.d(TAG, "detail request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xurl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        client.newCall(request).enqueue(new Callback() {
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -173,7 +162,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -182,7 +171,7 @@ public class BookNetHelper {
                     JsonNode jsonObject = JsonUtil.readTree(string);
                     int status = jsonObject.get("status").asInt();
                     if (!Common.statusSuccessful(status)) {
-                        dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                        dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                         return;
                     }
                     JsonNode data = jsonObject.get("data");
@@ -221,13 +210,13 @@ public class BookNetHelper {
         object.put("data", data.toString());
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "login request: %s", s);
+        LogUtil.d(TAG, "login request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xurl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        client.newCall(request).enqueue(new Callback() {
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: ", LogUtil.getStackTraceString(e));
@@ -238,7 +227,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -247,7 +236,7 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 JsonNode respData = JsonUtil.readTree(jsonObject.get("data").asText());
@@ -265,11 +254,18 @@ public class BookNetHelper {
         });
     }
 
-    public void download(String downloadUrl, String destDir, String uid, DataCallback dataCallback, ProgressListener listener) {
-        downloadWithCookie(downloadUrl, destDir, uid, SessionManager.getSession(), dataCallback, listener);
+    public void download(String downloadUrl, String destDir, String uid,
+                         DataCallback dataCallback, ProgressListener listener) {
+        downloadWithMagic(downloadUrl, destDir, uid, dataCallback, listener, 0);
     }
 
-    public void downloadWithCookie(String downloadUrl, String destDir, String uid, String cookie, DataCallback dataCallback, ProgressListener listener) {
+    public void downloadWithMagic(String downloadUrl, String destDir, String uid,
+                                  DataCallback dataCallback, ProgressListener listener, long magic) {
+        downloadWithCookie(downloadUrl, destDir, uid, SessionManager.getSession(), dataCallback, listener, magic);
+    }
+
+    public void downloadWithCookie(String downloadUrl, String destDir, String uid, String cookie,
+                                   DataCallback dataCallback, ProgressListener listener, long magic) {
         Map<String, Object> object = new HashMap<>();
         String reqUrl = downloadUrl;
         object.put("method", "GET");
@@ -285,12 +281,12 @@ public class BookNetHelper {
         object.put("params", params);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "download request: %s", s);
-        Request request = new Request.Builder()
-                .url(xurl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        syncClient.newCall(request).enqueue(new Callback() {
+        LogUtil.d(TAG, "download request: %s : %s", reqUrl, s);
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -301,7 +297,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 File dir = new File(destDir);
@@ -311,20 +307,41 @@ public class BookNetHelper {
                 }
                 String contentDisposition = response.headers().get("Content-Disposition");
                 LogUtil.d(TAG, "contentDisposition: %s", contentDisposition);
-                String filename = ContentDispositionParser.parse(contentDisposition);
-                filename = Common.isEmpty(filename) ? "tmp-" + UUID.randomUUID().toString() : filename;
+
+                String filename = "";
+                if (Common.isBlank(contentDisposition)) {
+                    int idx = reqUrl.lastIndexOf("/");
+                    if (idx > -1) {
+                        filename = reqUrl.substring(idx + 1);
+                    }
+                } else {
+                    filename = ContentDispositionParser.parse(contentDisposition);
+                }
+                filename = Common.isBlank(filename) ? "tmp-" + UUID.randomUUID().toString() : filename;
 
                 File f = new File(destDir, Common.isEmpty(uid) ? filename : uid + "-" + filename);
                 long total = response.body().contentLength();
                 try (InputStream input = response.body().byteStream();
                      FileOutputStream output = new FileOutputStream(f)) {
-
+                    if (magic > 0) {
+                        long m = magic ^ Common.MG_XOR;
+                        ByteBuffer buf = ByteBuffer.allocate(8);
+                        buf.putLong(m);
+                        buf.flip();
+                        byte[] bytes = buf.array();
+                        output.write(bytes);
+                    }
                     byte[] buffer = new byte[1024 * 8];
                     long count = 0;
                     int n;
                     while (-1 != (n = input.read(buffer))) {
-                        output.write(buffer, 0, n);
+                        if (magic > 0) {
+                            output.write(Common.xor(buffer, n, Common.MG_XOR), 0, n);
+                        } else {
+                            output.write(buffer, 0, n);
+                        }
                         count += n;
+                        output.flush();
                         if (listener != null) {
                             listener.onProgress(count, total);
                         }
@@ -337,7 +354,85 @@ public class BookNetHelper {
                 dataCallback.call(f, null);
             }
         });
+    }
 
+    public void downloadApk(String downloadUrl, DataCallback dataCallback, ProgressListener listener) {
+        Map<String, Object> object = new HashMap<>();
+        String reqUrl = downloadUrl;
+        object.put("method", "GET");
+        object.put("url", reqUrl);
+
+        Map<String, Object> headers = new HashMap<>();
+        headers.put("User-Agent", userAgent);
+        headers.put(cookie_key, SessionManager.getSession());
+        headers.put("b", "1");
+        object.put("headers", headers);
+
+        Map<String, Object> params = new HashMap<>();
+        object.put("params", params);
+
+        String s = JsonUtil.toJson(object);
+        LogUtil.d(TAG, "download request: %s : %s", reqUrl, s);
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
+                dataCallback.call(null, e);
+            }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    LogUtil.d(TAG, "onResponse: %s", response.code());
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
+                    return;
+                }
+                File dir = new File(Common.sdcard);
+                if (!dir.exists()) {
+                    boolean mkdirs = dir.mkdirs();
+                    LogUtil.d(TAG, "mkdirs: %s", mkdirs);
+                }
+                String contentDisposition = response.headers().get("Content-Disposition");
+                LogUtil.d(TAG, "contentDisposition: %s", contentDisposition);
+
+                String filename = "";
+                if (Common.isBlank(contentDisposition)) {
+                    int idx = reqUrl.lastIndexOf("/");
+                    if (idx > -1) {
+                        filename = reqUrl.substring(idx + 1);
+                    }
+                } else {
+                    filename = ContentDispositionParser.parse(contentDisposition);
+                }
+                filename = Common.isBlank(filename) ? "tmp-" + UUID.randomUUID().toString() : filename;
+
+                File f = new File(Common.sdcard, filename);
+                long total = response.body().contentLength();
+                try (InputStream input = response.body().byteStream();
+                     FileOutputStream output = new FileOutputStream(f)) {
+                    byte[] buffer = new byte[1024 * 8];
+                    long count = 0;
+                    int n;
+                    while (-1 != (n = input.read(buffer))) {
+                        output.write(buffer, 0, n);
+                        count += n;
+                        output.flush();
+                        if (listener != null) {
+                            listener.onProgress(count, total);
+                        }
+                    }
+                    output.flush();
+                    if (listener != null) {
+                        listener.onProgress(count, total);
+                    }
+                }
+                dataCallback.call(f, null);
+            }
+        });
     }
 
     public void profile(DataCallback dataCallback) {
@@ -355,12 +450,12 @@ public class BookNetHelper {
         object.put("params", params);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "profile request: %s", s);
-        Request request = new Request.Builder()
-                .url(xurl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        client.newCall(request).enqueue(new Callback() {
+        LogUtil.d(TAG, "profile request: %s : %s", reqUrl, s);
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -371,7 +466,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -380,14 +475,14 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 JsonNode data = jsonObject.get("data");
                 Profile profile = JsonUtil.convertValue(data, new TypeReference<Profile>() {
                 });
                 if (Common.isEmpty(profile.getEmail())) {
-                    dataCallback.call(null, new HttpStatusException(401 + "", 401, reqUrl));
+                    dataCallback.call(null, new HttpStatusException("未登录", 401, reqUrl));
                     return;
                 }
                 dataCallback.call(profile, null);
@@ -395,7 +490,7 @@ public class BookNetHelper {
         });
     }
 
-    public void sendCode(String email, String password, DataCallback dataCallback) {
+    public void sendCode(String email, String password, String nickname, DataCallback dataCallback) {
         Map<String, Object> object = new HashMap<>();
         String reqUrl = zurl + "/papi/user/verification/send-code";
         object.put("method", "POST");
@@ -409,7 +504,7 @@ public class BookNetHelper {
         Map<String, Object> data = new HashMap<>();
         data.put("email", email);
         data.put("password", password);
-        data.put("name", email.split("\\@")[0]);
+        data.put("name", Common.isBlank(nickname) ? Common.urlEncode(email.split("\\@")[0]) : Common.urlEncode(nickname));
         data.put("rx", "215");
         data.put("action", "registration");
         data.put("redirectUrl", "");
@@ -419,12 +514,12 @@ public class BookNetHelper {
         object.put("params", params);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "send-code request: %s", s);
-        Request request = new Request.Builder()
-                .url(xurl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        client.newCall(request).enqueue(new Callback() {
+        LogUtil.d(TAG, "send-code request: %s : %s", reqUrl, s);
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -435,7 +530,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -444,7 +539,7 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 String data = jsonObject.get("data").asText();
@@ -456,7 +551,64 @@ public class BookNetHelper {
         });
     }
 
-    public void registration(String email, String password, String verifyCode, DataCallback dataCallback) {
+    public void sendCodePasswordRecovery(String email, DataCallback dataCallback) {
+        Map<String, Object> object = new HashMap<>();
+        String reqUrl = zurl + "/papi/user/verification/send-code";
+        object.put("method", "POST");
+        object.put("url", reqUrl);
+
+        Map<String, Object> headers = new HashMap<>();
+        headers.put("User-Agent", userAgent);
+        headers.put(content_type_key, "multipart/form-data");
+        object.put("headers", headers);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("email", email);
+        data.put("action", "passwordrecovery");
+        object.put("data", data);
+
+        Map<String, Object> params = new HashMap<>();
+        object.put("params", params);
+
+        String s = JsonUtil.toJson(object);
+        LogUtil.d(TAG, "send-code password recovery request: %s : %s", reqUrl, s);
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
+                dataCallback.call(null, e);
+            }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    LogUtil.d(TAG, "onResponse: %s", response.code());
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
+                    return;
+                }
+                String string = response.body().string();
+                LogUtil.d(TAG, "send-code password recovery response: %s", string);
+                JsonNode jsonObject = JsonUtil.readTree(string);
+                int status = jsonObject.get("status").asInt();
+                if (!Common.statusSuccessful(status)) {
+                    LogUtil.d(TAG, "onResponse: %s", status);
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
+                    return;
+                }
+                String data = jsonObject.get("data").asText();
+                JsonNode dataObject = JsonUtil.readTree(data);
+                // "data": "{\"success\":1}}" 1success 0error
+                int success = dataObject.get("success").asInt();
+                dataCallback.call(dataObject, null);
+            }
+        });
+    }
+
+    public void registration(String email, String password, String verifyCode, String nickname, DataCallback dataCallback) {
         Map<String, Object> object = new HashMap<>();
         String reqUrl = zurl + "/rpc.php";
         object.put("method", "POST");
@@ -474,7 +626,7 @@ public class BookNetHelper {
         data.append("isModal=true").append("&");
         data.append("email=").append(Common.urlEncode(email)).append("&");
         data.append("password=").append(Common.urlEncode(password)).append("&");
-        data.append("name=").append(email.split("\\@")[0]).append("&");
+        data.append("name=").append(Common.isBlank(nickname) ? Common.urlEncode(email.split("\\@")[0]) : Common.urlEncode(nickname)).append("&");
         data.append("rx=215").append("&");
         data.append("action=registration").append("&");
         data.append("redirectUrl=").append("&");
@@ -483,13 +635,13 @@ public class BookNetHelper {
         object.put("data", data.toString());
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "registration request: %s", s);
+        LogUtil.d(TAG, "registration request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xurl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        client.newCall(request).enqueue(new Callback() {
+        Request.Builder builder = new Request.Builder()
+                .url(getXurl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -500,7 +652,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -509,7 +661,7 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 String data = jsonObject.get("data").asText();
@@ -558,13 +710,13 @@ public class BookNetHelper {
                 object.put("data", data);
 
                 String s = JsonUtil.toJson(object);
-                LogUtil.d(TAG, "cloud sync meta request: %s", s);
+                LogUtil.d(TAG, "cloud sync meta request: %s : %s", reqUrl, s);
 
-                Request request = new Request.Builder()
-                        .url(xburl)
-                        .post(RequestBody.create(s, MediaType.parse("application/json")))
-                        .build();
-                syncClient.newCall(request).enqueue(new Callback() {
+                Request.Builder builder = new Request.Builder()
+                        .url(getXburl())
+                        .post(RequestBody.create(s, MediaType.parse("application/json")));
+                setCommonHeader(builder);
+                HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
                     @Override
                     public void onFailure(@NonNull Call call, @NonNull IOException e) {
                         LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -575,7 +727,7 @@ public class BookNetHelper {
                     public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                         if (!response.isSuccessful()) {
                             LogUtil.d(TAG, "onResponse: %s", response.code());
-                            dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                            dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                             return;
                         }
                         String string = response.body().string();
@@ -584,7 +736,7 @@ public class BookNetHelper {
                         int status = jsonObject.get("status").asInt();
                         if (!Common.statusSuccessful(status)) {
                             LogUtil.d(TAG, "onResponse: %s", status);
-                            dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                            dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                             return;
                         }
                         dataCallback.call(jsonObject, null);
@@ -615,12 +767,12 @@ public class BookNetHelper {
             object.put("data", data);
 
             String s = JsonUtil.toJson(object);
-            LogUtil.d(TAG, "cloud sync data request: %s", s);
-            Request request = new Request.Builder()
-                    .url(xburl)
-                    .post(RequestBody.create(s, MediaType.parse("application/json")))
-                    .build();
-            syncClient.newCall(request).enqueue(new Callback() {
+            LogUtil.d(TAG, "cloud sync data request: %s : %s", reqUrl, s);
+            Request.Builder builder = new Request.Builder()
+                    .url(getXburl())
+                    .post(RequestBody.create(s, MediaType.parse("application/json")));
+            setCommonHeader(builder);
+            HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
                 @Override
                 public void onFailure(@NonNull Call call, @NonNull IOException e) {
                     LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -631,7 +783,7 @@ public class BookNetHelper {
                 public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                     if (!response.isSuccessful()) {
                         LogUtil.d(TAG, "onResponse: %s", response.code());
-                        dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                        dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                         return;
                     }
                     String string = response.body().string();
@@ -640,7 +792,7 @@ public class BookNetHelper {
                     int status = jsonObject.get("status").asInt();
                     if (!Common.statusSuccessful(status)) {
                         LogUtil.d(TAG, "onResponse: %s", status);
-                        dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                        dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                         return;
                     }
                     dataCallback.call(jsonObject, null);
@@ -668,13 +820,13 @@ public class BookNetHelper {
         object.put("data", data);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "cloud list request: %s", s);
+        LogUtil.d(TAG, "cloud list request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xburl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        syncClient.newCall(request).enqueue(new Callback() {
+        Request.Builder builder = new Request.Builder()
+                .url(getXburl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -685,7 +837,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -694,7 +846,7 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 dataCallback.call(jsonObject, null);
@@ -719,13 +871,13 @@ public class BookNetHelper {
         object.put("data", data);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "cloud download request: %s", s);
+        LogUtil.d(TAG, "cloud download request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xburl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        syncClient.newCall(request).enqueue(new Callback() {
+        Request.Builder builder = new Request.Builder()
+                .url(getXburl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -736,7 +888,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(new byte[0], new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(new byte[0], new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 byte[] bytes = response.body().bytes();
@@ -763,14 +915,14 @@ public class BookNetHelper {
         object.put("data", data);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "log request: %s", s);
+        LogUtil.d(TAG, "log request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xburl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
+        Request.Builder builder = new Request.Builder()
+                .url(getXburl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
 
-        syncClient.newCall(request).enqueue(new Callback() {
+        HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
@@ -781,7 +933,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -790,7 +942,7 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 dataCallback.call(jsonObject, null);
@@ -815,13 +967,13 @@ public class BookNetHelper {
         object.put("data", data);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "cloud get meta request: %s", s);
+        LogUtil.d(TAG, "cloud get meta request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xburl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        syncClient.newCall(request).enqueue(new Callback() {
+        Request.Builder builder = new Request.Builder()
+                .url(getXburl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", e);
@@ -832,7 +984,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -841,7 +993,7 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 dataCallback.call(jsonObject, null);
@@ -857,19 +1009,20 @@ public class BookNetHelper {
 
         Map<String, Object> headers = new HashMap<>();
         headers.put("User-Agent", userAgent);
+        headers.put(cookie_key, SessionManager.getSession());
         object.put("headers", headers);
 
         Map<String, Object> data = new HashMap<>();
         object.put("data", data);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "cloud versions request: %s", s);
+        LogUtil.d(TAG, "cloud versions request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xburl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        syncClient.newCall(request).enqueue(new Callback() {
+        Request.Builder builder = new Request.Builder()
+                .url(getXburl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", e);
@@ -880,7 +1033,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -889,7 +1042,7 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 dataCallback.call(jsonObject, null);
@@ -905,6 +1058,7 @@ public class BookNetHelper {
 
         Map<String, Object> headers = new HashMap<>();
         headers.put("User-Agent", userAgent);
+        headers.put(cookie_key, SessionManager.getSession());
         object.put("headers", headers);
 
         Map<String, Object> data = new HashMap<>();
@@ -913,13 +1067,13 @@ public class BookNetHelper {
         object.put("data", data);
 
         String s = JsonUtil.toJson(object);
-        LogUtil.d(TAG, "cloud issues request: %s", s);
+        LogUtil.d(TAG, "cloud issues request: %s : %s", reqUrl, s);
 
-        Request request = new Request.Builder()
-                .url(xburl)
-                .post(RequestBody.create(s, MediaType.parse("application/json")))
-                .build();
-        syncClient.newCall(request).enqueue(new Callback() {
+        Request.Builder builder = new Request.Builder()
+                .url(getXburl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getSyncClient().newCall(builder.build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 LogUtil.d(TAG, "onFailure: %s", e);
@@ -930,7 +1084,7 @@ public class BookNetHelper {
             public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     LogUtil.d(TAG, "onResponse: %s", response.code());
-                    dataCallback.call(null, new HttpStatusException(response.code() + "", response.code(), reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
                     return;
                 }
                 String string = response.body().string();
@@ -939,12 +1093,131 @@ public class BookNetHelper {
                 int status = jsonObject.get("status").asInt();
                 if (!Common.statusSuccessful(status)) {
                     LogUtil.d(TAG, "onResponse: %s", status);
-                    dataCallback.call(null, new HttpStatusException(status + "", status, reqUrl));
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
                     return;
                 }
                 dataCallback.call(jsonObject, null);
             }
         });
+    }
+
+    public void resetpwd(String email, String password, String code, DataCallback<JsonNode> dataCallback) {
+        Map<String, Object> object = new HashMap<>();
+        String reqUrl = "/zlib_resetpwd";
+        object.put("method", "POST");
+        object.put("url", reqUrl);
+
+        Map<String, Object> headers = new HashMap<>();
+        headers.put("User-Agent", userAgent);
+        headers.put(content_type_key, "application/json");
+        object.put("headers", headers);
+
+        Map<String, Object> params = new HashMap<>();
+        object.put("params", params);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("email", email);
+        data.put("password", password);
+        data.put("code", code);
+        object.put("data", data);
+
+        String s = JsonUtil.toJson(object);
+        LogUtil.d(TAG, "resetpwd request: %s : %s", reqUrl, s);
+
+        Request.Builder builder = new Request.Builder()
+                .url(getXburl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
+                dataCallback.call(null, e);
+            }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    LogUtil.d(TAG, "onResponse: %s", response.code());
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
+                    return;
+                }
+                String string = response.body().string();
+                LogUtil.d(TAG, "resetpwd response: %s", string);
+                JsonNode jsonObject = JsonUtil.readTree(string);
+                int status = jsonObject.get("status").asInt();
+                if (!Common.statusSuccessful(status)) {
+                    LogUtil.d(TAG, "onResponse: %s", status);
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
+                    return;
+                }
+                JsonNode data = jsonObject.get("data");
+                dataCallback.call(data, null);
+            }
+        });
+    }
+
+    public void detailSuggest(String detailUrl, DataCallback<List<Book>> dataCallback) {
+        Map<String, Object> object = new HashMap<>();
+        String reqUrl = "/zlib_detail_suggest";
+        object.put("method", "POST");
+        object.put("url", reqUrl);
+
+        Map<String, Object> headers = new HashMap<>();
+        headers.put("User-Agent", userAgent);
+        headers.put(cookie_key, SessionManager.getSession());
+        object.put("headers", headers);
+
+        Map<String, Object> params = new HashMap<>();
+        object.put("params", params);
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("detail_url", detailUrl);
+        object.put("data", data);
+
+        String s = JsonUtil.toJson(object);
+        LogUtil.d(TAG, "detail suggest request: %s", s);
+
+        Request.Builder builder = new Request.Builder()
+                .url(getXburl())
+                .post(RequestBody.create(s, MediaType.parse("application/json")));
+        setCommonHeader(builder);
+        HttpHelper.getClient().newCall(builder.build()).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                LogUtil.d(TAG, "onFailure: %s", LogUtil.getStackTraceString(e));
+                dataCallback.call(null, e);
+            }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    LogUtil.d(TAG, "onResponse: %s", response.code());
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", response.code(), reqUrl));
+                    return;
+                }
+                String string = response.body().string();
+                LogUtil.d(TAG, "detail suggest response: %s", string);
+                JsonNode jsonObject = JsonUtil.readTree(string);
+                int status = jsonObject.get("status").asInt();
+                if (!Common.statusSuccessful(status)) {
+                    LogUtil.d(TAG, "onResponse: %s", status);
+                    dataCallback.call(null, new HttpStatusException(response.header(Common.x_message) + "", status, reqUrl));
+                    return;
+                }
+                JsonNode list = jsonObject.get("data").get("list");
+                List<Book> books = JsonUtil.convertValue(list, new TypeReference<List<Book>>() {
+                });
+                dataCallback.call(books, null);
+            }
+        });
+    }
+
+    void setCommonHeader(Request.Builder builder) {
+        builder.header(Common.header_vc, UiUtils.getVersionCode() + "")
+                .header(Common.header_vn, UiUtils.getVersionName())
+                .header(Common.header_platform, Common.platform_android)
+                .header(Common.header_sv, android.os.Build.VERSION.RELEASE);
     }
 
 }

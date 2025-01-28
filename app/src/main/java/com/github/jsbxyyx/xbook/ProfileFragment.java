@@ -18,7 +18,6 @@ import android.widget.ArrayAdapter;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -33,11 +32,13 @@ import com.github.jsbxyyx.xbook.common.LogUtil;
 import com.github.jsbxyyx.xbook.common.ProgressListener;
 import com.github.jsbxyyx.xbook.common.SPUtils;
 import com.github.jsbxyyx.xbook.common.SessionManager;
+import com.github.jsbxyyx.xbook.common.UiUtils;
 import com.github.jsbxyyx.xbook.data.BookDbHelper;
 import com.github.jsbxyyx.xbook.data.BookNetHelper;
 import com.github.jsbxyyx.xbook.data.bean.Book;
 import com.github.jsbxyyx.xbook.data.bean.BookReader;
 import com.github.jsbxyyx.xbook.data.bean.Profile;
+import com.squareup.picasso.Picasso;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -127,6 +128,7 @@ public class ProfileFragment extends Fragment {
                 SPUtils.putData(mActivity, Common.login_key, "");
                 SPUtils.putData(mActivity, Common.profile_nickname_key, "");
                 SPUtils.putData(mActivity, Common.profile_email_key, "");
+                SessionManager.setSession(SPUtils.getData(mActivity, Common.login_key));
                 onResume();
             });
             String email = SPUtils.getData(mActivity, Common.profile_email_key);
@@ -136,7 +138,7 @@ public class ProfileFragment extends Fragment {
                     public void call(Profile profile, Throwable err) {
                         mActivity.runOnUiThread(() -> {
                             if (err != null) {
-                                Toast.makeText(getActivity(), "获取个人资料失败", Toast.LENGTH_LONG).show();
+                                UiUtils.showToast("获取个人资料失败:" + err.getMessage());
                                 return;
                             }
                             tv_profile_nickname.setText(profile.getNickname());
@@ -159,6 +161,7 @@ public class ProfileFragment extends Fragment {
         data.add("云同步本地");
         data.add("设置");
         data.add("意见反馈");
+        data.add("支持一下");
         data.add("测试");
         lv_profile.setAdapter(new ArrayAdapter(mActivity, R.layout.profile_item, R.id.tv_profile_item, data));
         lv_profile.setOnItemClickListener((parent, view1, position, id) -> {
@@ -171,12 +174,17 @@ public class ProfileFragment extends Fragment {
                 settings();
             } else if (position == 2) {
                 issues();
+            } else if (position == 3) {
+                help();
             }
         });
 
+        String readerImageShow = SPUtils.getData(mActivity, Common.reader_image_show_key, "1");
+
         List<Book> dataList = bookDbHelper.findAllBook();
         lv_download_book = mView.findViewById(R.id.lv_download_book);
-        mBookDownloadAdapter = new ListBookDownloadAdapter(mActivity, dataList, new ListItemClickListener() {
+        mBookDownloadAdapter = new ListBookDownloadAdapter(mActivity, dataList,
+                Common.checked.equals(readerImageShow), new ListItemClickListener() {
             @Override
             public void onClick(View view, String type, int position) {
                 if (Common.action_delete.equals(type)) {
@@ -202,7 +210,7 @@ public class ProfileFragment extends Fragment {
                         @Override
                         public void call(JsonNode o, Throwable err) {
                             if (err != null) {
-                                LogUtil.d(TAG, "upload error 1: %s", book.getTitle());
+                                LogUtil.d(TAG, "书籍同步失败: %s", book.getTitle());
                                 return;
                             }
                             String name = o.get("data").get("name").asText();
@@ -212,7 +220,7 @@ public class ProfileFragment extends Fragment {
                             bookDbHelper.updateBook(book_db);
                             LogUtil.d(TAG, "upload 2: %s", name);
                             mActivity.runOnUiThread(() -> {
-                                Toast.makeText(mActivity, "同步成功《" + book.getTitle() + "》", Toast.LENGTH_LONG).show();
+                                UiUtils.showToast("同步成功《" + book.getTitle() + "》");
                             });
                         }
                     });
@@ -223,7 +231,7 @@ public class ProfileFragment extends Fragment {
                         public void call(JsonNode o, Throwable err) {
                             if (err != null) {
                                 mActivity.runOnUiThread(() -> {
-                                    Toast.makeText(mActivity, "同步阅读进度失败", Toast.LENGTH_LONG).show();
+                                    UiUtils.showToast("同步阅读进度失败：" + err.getMessage());
                                 });
                                 return;
                             }
@@ -249,7 +257,7 @@ public class ProfileFragment extends Fragment {
                                     LogUtil.d(TAG, "call: insert book: %s", book.getTitle());
                                 }
                                 mActivity.runOnUiThread(() -> {
-                                    Toast.makeText(mActivity, "同步阅读进度成功", Toast.LENGTH_LONG).show();
+                                    UiUtils.showToast("同步阅读进度成功");
                                 });
                             }
                         }
@@ -259,7 +267,7 @@ public class ProfileFragment extends Fragment {
                     if (!new File(book.getRemarkProperty("file_path")).exists()) {
                         View parent = (View) view.getParent();
                         TextView tv_text = parent.findViewById(R.id.tv_text);
-                        bookNetHelper.download(book.getDownloadUrl(), Common.xbook_dir, book.getBid(), new DataCallback.NopDataCallback(), new ProgressListener() {
+                        bookNetHelper.downloadWithMagic(book.getDownloadUrl(), Common.xbook_dir, book.getBid(), new DataCallback.NopDataCallback(), new ProgressListener() {
                             @Override
                             public void onProgress(long bytesRead, long total) {
                                 double percent = bytesRead * 1.0 / total * 100;
@@ -269,7 +277,17 @@ public class ProfileFragment extends Fragment {
                                     tv_text.setText(String.format("进度条：%.1f%%", percent));
                                 });
                             }
-                        });
+                        }, Common.MAGIC);
+                    }
+                } else if (Common.action_image_hide.equals(type)) {
+                    Book book = mBookDownloadAdapter.getDataList().get(position);
+                    View parent = (View) view.getParent();
+                    ImageView iv = parent.findViewById(R.id.book_reader_image);
+                    if (iv.getVisibility() == View.GONE) {
+                        Picasso.get().load(book.getCoverImage()).into(iv);
+                        iv.setVisibility(View.VISIBLE);
+                    } else {
+                        iv.setVisibility(View.GONE);
                     }
                 }
             }
@@ -281,6 +299,7 @@ public class ProfileFragment extends Fragment {
             Intent intent = new Intent(mActivity, ViewActivity.class);
             intent.putExtra("file_path", file_path);
             intent.putExtra("book_id", book.getId() + "");
+            intent.putExtra("book_title", book.getTitle());
             BookReader bookReader = book.getBookReader();
             if (bookReader == null) {
                 intent.putExtra("cur", "");
@@ -302,7 +321,7 @@ public class ProfileFragment extends Fragment {
                 public void call(JsonNode o, Throwable err) {
                     latch.countDown();
                     if (err != null) {
-                        LogUtil.d(TAG, "upAllBook err: %s", LogUtil.getStackTraceString(err));
+                        LogUtil.d(TAG, "书籍同步失败: %s", LogUtil.getStackTraceString(err));
                         return;
                     }
                     LogUtil.d(TAG, "upAllBook: %s", book.getTitle());
@@ -311,7 +330,7 @@ public class ProfileFragment extends Fragment {
                     book_db.putRemarkProperty("sha", sha);
                     bookDbHelper.updateBook(book_db);
                     mActivity.runOnUiThread(() -> {
-                        Toast.makeText(mActivity, "同步成功《" + book.getTitle() + "》", Toast.LENGTH_LONG).show();
+                        UiUtils.showToast("同步成功《" + book.getTitle() + "》");
                     });
                 }
             });
@@ -322,7 +341,7 @@ public class ProfileFragment extends Fragment {
             }
         }
         mActivity.runOnUiThread(() -> {
-            Toast.makeText(mActivity, "本地同步到云成功", Toast.LENGTH_LONG).show();
+            UiUtils.showToast("本地同步到云成功");
         });
     }
 
@@ -337,7 +356,7 @@ public class ProfileFragment extends Fragment {
                 if (err != null) {
                     mActivity.runOnUiThread(() -> {
                         loading.dismiss();
-                        Toast.makeText(mActivity, "err:" + err.getMessage(), Toast.LENGTH_LONG).show();
+                        UiUtils.showToast("云同步失败:" + err.getMessage());
                     });
                     return;
                 }
@@ -368,6 +387,10 @@ public class ProfileFragment extends Fragment {
                     if (!name.endsWith(Common.book_metadata_suffix)) {
                         String id = name.split("\\-")[0];
                         Book book = bookDbHelper.findBookById(id);
+                        if (book == null) {
+                            LogUtil.d(TAG, "ignore name : %s", name);
+                            continue;
+                        }
                         File file = new File(book.getRemarkProperty("file_path"));
                         if (file.exists()) {
                             LogUtil.d(TAG, "download: %s exist.", book.getTitle());
@@ -381,7 +404,10 @@ public class ProfileFragment extends Fragment {
                         public void call(byte[] bytes, Throwable err) {
                             try {
                                 if (err != null) {
-                                    LogUtil.e(TAG, "%s cloud download err. %s", name, LogUtil.getStackTraceString(err));
+                                    LogUtil.e(TAG, "%s 云下载失败. %s", name, LogUtil.getStackTraceString(err));
+                                    mActivity.runOnUiThread(() -> {
+                                        UiUtils.showToast("错误:" + err.getMessage());
+                                    });
                                     return;
                                 }
                                 if (name.endsWith(Common.book_metadata_suffix)) {
@@ -411,7 +437,7 @@ public class ProfileFragment extends Fragment {
                                     Files.write(new File(file_path).toPath(), bytes);
                                     LogUtil.d(TAG, "downloaded: %s", name);
                                     mActivity.runOnUiThread(() -> {
-                                        Toast.makeText(mActivity, "云同步《" + name + "》成功", Toast.LENGTH_LONG).show();
+                                        UiUtils.showToast("云同步《" + name + "》成功");
                                     });
                                 }
                             } catch (Exception e) {
@@ -429,8 +455,9 @@ public class ProfileFragment extends Fragment {
                 }
                 mActivity.runOnUiThread(() -> {
                     loading.dismiss();
-                    Toast.makeText(mActivity, "云同步到本地完成", Toast.LENGTH_LONG).show();
+                    UiUtils.showToast("云同步到本地完成");
                 });
+
             }
         });
     }
@@ -442,6 +469,13 @@ public class ProfileFragment extends Fragment {
 
     private void issues() {
         Intent intent = new Intent(getContext(), IssuesActivity.class);
+        startActivity(intent);
+    }
+
+    private void help() {
+        Intent intent = new Intent(getContext(), GeckoWebViewActivity.class);
+        intent.putExtra("url", "https://http2.idingdang.org/donate");
+        intent.putExtra("orientation", "v");
         startActivity(intent);
     }
 

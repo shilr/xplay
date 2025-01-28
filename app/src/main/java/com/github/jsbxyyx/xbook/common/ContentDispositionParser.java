@@ -9,7 +9,6 @@ import java.util.List;
 
 /**
  * @author jsbxyyx
- * @since 1.0
  */
 public class ContentDispositionParser {
 
@@ -23,6 +22,9 @@ public class ContentDispositionParser {
      * {@literal filename*} one decoded as defined in the RFC 5987), or {@code null} if not defined.
      */
     public static String parse(String contentDisposition) {
+        if (contentDisposition == null || "".equals(contentDisposition.trim())) {
+            return null;
+        }
         List<String> parts = tokenize(contentDisposition);
         String filename = null;
         Charset charset;
@@ -51,7 +53,7 @@ public class ContentDispositionParser {
                     filename = value;
                 }
             } else {
-                throw new IllegalArgumentException("Invalid content disposition format");
+                System.out.println("Invalid content disposition format");
             }
             if (filename != null && !"".equals(filename)) {
                 return filename;

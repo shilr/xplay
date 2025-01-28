@@ -17,28 +17,31 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:hardwareAccelerated="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/logo"
         android:label="@string/app_name"
         android:largeHeap="true"
         android:requestLegacyExternalStorage="true"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@mipmap/logo_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Xbook"
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
         <activity
-            android:name=".IssuesActivity"
+            android:name=".GeckoWebViewActivity"
             android:exported="false" />
         <activity
-            android:name=".VideoViewActivity2"
-            android:configChanges="orientation|screenSize"
-            android:exported="false"
-            android:screenOrientation="landscape" />
+            android:name=".ForgetpwdActivity"
+            android:exported="false" />
+        <activity
+            android:name=".IssuesActivity"
+            android:exported="false" />
+        <!--
         <activity
             android:name=".VideoViewActivity"
             android:configChanges="orientation|screenSize"
             android:exported="false"
             android:screenOrientation="landscape" />
+        -->
         <activity
             android:name=".SettingsActivity"
             android:exported="false"

@@ -9,7 +9,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ListView;
-import android.widget.Toast;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -18,8 +18,10 @@ import androidx.fragment.app.Fragment;
 import com.github.jsbxyyx.xbook.common.Common;
 import com.github.jsbxyyx.xbook.common.DataCallback;
 import com.github.jsbxyyx.xbook.common.LogUtil;
+import com.github.jsbxyyx.xbook.common.UiUtils;
 import com.github.jsbxyyx.xbook.data.VideoNetHelper;
 import com.github.jsbxyyx.xbook.data.bean.QqVideo;
+import com.github.jsbxyyx.xbook.data.bean.QqVideoHotWord;
 
 import java.util.List;
 
@@ -35,6 +37,7 @@ public class VideoListFragment extends Fragment {
     private ListView lv_video_list;
     private ListVideoAdapter listVideoAdapter;
     private VideoNetHelper videoNetHelper;
+    private AutoLinearLayout ll_hot_rank;
 
     private int page = 1;
 
@@ -57,6 +60,10 @@ public class VideoListFragment extends Fragment {
         mActivity = getActivity();
 
         lv_video_list = view.findViewById(R.id.lv_video_list);
+        Button btn_video_search = view.findViewById(R.id.btn_video_search);
+        Button btn_hot_search = view.findViewById(R.id.btn_hot_search);
+        ll_hot_rank = view.findViewById(R.id.ll_hot_rank);
+
         listVideoAdapter = new ListVideoAdapter(mActivity, null, new ListItemClickListener() {
             @Override
             public void onClick(View view, String type, int position) {
@@ -65,17 +72,23 @@ public class VideoListFragment extends Fragment {
                 QqVideo.QqPlaylist playlist = video.getPlaylist().get(position);
                 String playUrl = video.getPlayer() + playlist.getUrl();
                 LogUtil.d(TAG, "%s", playUrl);
-                Intent intent = new Intent(mActivity, VideoViewActivity2.class);
-                intent.putExtra("playUrl", playUrl);
+                Intent intent = new Intent(mActivity, GeckoWebViewActivity.class);
+                intent.putExtra("url", playUrl);
+                intent.putExtra("orientation", "h");
                 startActivity(intent);
             }
         });
         lv_video_list.setAdapter(listVideoAdapter);
 
-        Button btn_video_search = view.findViewById(R.id.btn_video_search);
         btn_video_search.setOnClickListener(v -> {
             showListView(true);
         });
+
+        btn_hot_search.setOnClickListener(v -> {
+            hotSearch();
+        });
+
+        hotSearch();
     }
 
     private void showListView(boolean clear) {
@@ -96,7 +109,7 @@ public class VideoListFragment extends Fragment {
                 mActivity.runOnUiThread(() -> {
                     loading.dismiss();
                     if (err != null) {
-                        Toast.makeText(mActivity, "err: " + err.getMessage(), Toast.LENGTH_LONG).show();
+                        UiUtils.showToast("搜索视频失败: " + err.getMessage());
                         return;
                     }
                     if (clear) {
@@ -104,6 +117,33 @@ public class VideoListFragment extends Fragment {
                     }
                     listVideoAdapter.getDataList().addAll(list);
                     listVideoAdapter.notifyDataSetChanged();
+                });
+            }
+        });
+    }
+
+    private void hotSearch() {
+        videoNetHelper.hotWord(new DataCallback<List<QqVideoHotWord>>() {
+            @Override
+            public void call(List<QqVideoHotWord> list, Throwable err) {
+                mActivity.runOnUiThread(() -> {
+                    if (err != null) {
+                        UiUtils.showToast("获取热搜失败");
+                    }
+                    ll_hot_rank.removeAllViews();
+                    if (list != null && !list.isEmpty()) {
+                        for (QqVideoHotWord hotWord : list) {
+                            TextView tv = new TextView(mActivity);
+                            tv.setText(hotWord.getSearchWord());
+                            tv.setOnClickListener(v -> {
+                                EditText et_video_keyword = mView.findViewById(R.id.et_video_keyword);
+                                TextView _tv = (TextView) v;
+                                et_video_keyword.setText(_tv.getText());
+                                showListView(true);
+                            });
+                            ll_hot_rank.addView(tv);
+                        }
+                    }
                 });
             }
         });

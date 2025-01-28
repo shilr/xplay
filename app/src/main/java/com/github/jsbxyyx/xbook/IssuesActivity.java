@@ -5,13 +5,15 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.github.jsbxyyx.xbook.common.Common;
-import com.github.jsbxyyx.xbook.common.DataCallback;
+import com.github.jsbxyyx.xbook.common.SessionManager;
+import com.github.jsbxyyx.xbook.common.UiUtils;
 import com.github.jsbxyyx.xbook.data.BookNetHelper;
+
+import java.util.Map;
 
 /**
  * @author jsbxyyx
@@ -39,24 +41,25 @@ public class IssuesActivity extends AppCompatActivity {
                 String title = et_issues_title.getText().toString();
                 String body = et_issues_body.getText().toString();
                 if (Common.isEmpty(title) || Common.isEmpty(body)) {
-                    Toast.makeText(getBaseContext(), "标题或内容不能为空", Toast.LENGTH_LONG).show();
+                    UiUtils.showToast("标题或内容不能为空");
                     return;
                 }
-                body += ("\n\n来源：[" + android.os.Build.MODEL + "] " + android.os.Build.VERSION.RELEASE + "\n");
+                Map<String, String> kv = Common.parseKv(SessionManager.getSession());
+                String userid = kv.getOrDefault(Common.serv_userid, "");
+                body += ("\n\n用户 : [" + userid + "]" +
+                        "\n\n来源 : [" + android.os.Build.MODEL + " | " + android.os.Build.VERSION.RELEASE + "]" +
+                        "\n\n[APP : " + UiUtils.getVersionName() + "]");
                 LoadingDialog loading = new LoadingDialog(mActivity, "疯狂提交中...");
                 loading.show();
-                bookNetHelper.cloudIssues(title, body, new DataCallback() {
-                    @Override
-                    public void call(Object o, Throwable err) {
-                        runOnUiThread(() -> {
-                            loading.dismiss();
-                            if (err != null) {
-                                Toast.makeText(getBaseContext(), "提交失败", Toast.LENGTH_LONG).show();
-                                return;
-                            }
-                            Toast.makeText(getBaseContext(), "提交成功", Toast.LENGTH_LONG).show();
-                        });
-                    }
+                bookNetHelper.cloudIssues(title, body, (o, err) -> {
+                    runOnUiThread(() -> {
+                        loading.dismiss();
+                        if (err != null) {
+                            UiUtils.showToast("提交反馈失败：" + err.getMessage());
+                            return;
+                        }
+                        UiUtils.showToast("提交成功");
+                    });
                 });
             }
         });

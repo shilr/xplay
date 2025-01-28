@@ -2,7 +2,6 @@ package com.github.jsbxyyx.xbook;
 
 import android.app.Application;
 import android.os.Looper;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 
@@ -10,11 +9,15 @@ import com.github.jsbxyyx.xbook.common.Common;
 import com.github.jsbxyyx.xbook.common.DataCallback;
 import com.github.jsbxyyx.xbook.common.LogUtil;
 import com.github.jsbxyyx.xbook.common.SPUtils;
+import com.github.jsbxyyx.xbook.common.UiUtils;
 import com.github.jsbxyyx.xbook.data.BookNetHelper;
+import com.github.jsbxyyx.xbook.data.IpNetHelper;
+import com.github.jsbxyyx.xbook.data.bean.Ip;
 import com.github.jsbxyyx.xbook.data.bean.MLog;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
 /**
@@ -24,45 +27,72 @@ import java.util.concurrent.CountDownLatch;
 public class LifecycleApplication extends Application {
 
     private BookNetHelper bookNetHelper;
+    private IpNetHelper ipNetHelper;
 
     @Override
     public void onCreate() {
         super.onCreate();
 
+        UiUtils.initContext(getApplicationContext());
+
         bookNetHelper = new BookNetHelper();
+        ipNetHelper = new IpNetHelper();
 
         String languages = "chinese,japanese,traditional chinese,english,korean,";
-        SPUtils.putData(getBaseContext(), Common.search_language_key, languages);
+        String languagesData = SPUtils.getData(getBaseContext(), Common.search_language_key, null);
+        if (Common.isNull(languagesData)) {
+            SPUtils.putData(getBaseContext(), Common.search_language_key, languages);
+        }
 
-        String extData = SPUtils.getData(getBaseContext(), Common.search_ext_key);
-        if (Common.isEmpty(extData)) {
+        String extData = SPUtils.getData(getBaseContext(), Common.search_ext_key, null);
+        if (Common.isNull(extData)) {
             extData = "EPUB,";
             SPUtils.putData(getBaseContext(), Common.search_ext_key, extData);
         }
 
-        String syncData = SPUtils.getData(getBaseContext(), Common.sync_key);
-        if (Common.isEmpty(syncData)) {
-            syncData = Common.sync_key_checked;
+        String syncData = SPUtils.getData(getBaseContext(), Common.sync_key, null);
+        if (Common.isNull(syncData)) {
+            syncData = Common.checked;
             SPUtils.putData(getBaseContext(), Common.sync_key, syncData);
+        }
+
+        CountDownLatch latch = new CountDownLatch(1);
+        ipNetHelper.fetchIP(new DataCallback<List<Ip>>() {
+            @Override
+            public void call(List<Ip> ips, Throwable err) {
+                if (err != null) {
+                    UiUtils.showToast(err.getMessage());
+                }
+                Common.setIPS(ips);
+                LogUtil.d(getClass().getSimpleName(), "set ips : %s", Common.getIPS().size());
+                latch.countDown();
+            }
+        });
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
         }
 
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             @Override
             public void uncaughtException(@NonNull Thread t, @NonNull Throwable e) {
+
                 MLog mLog = new MLog();
                 mLog.setTitle(new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date()) + Common.log_suffix);
-                mLog.setRaw(("[" + android.os.Build.MODEL + " " + android.os.Build.VERSION.RELEASE + "]\n\n") + LogUtil.getStackTraceString(e));
+                mLog.setRaw(("[OS : " + android.os.Build.MODEL + " | " + android.os.Build.VERSION.RELEASE + "]"
+                        + "[APP : " + UiUtils.getVersionName() + "]\n\n")
+                        + LogUtil.getStackTraceString(e));
                 CountDownLatch latch = new CountDownLatch(1);
                 bookNetHelper.cloudLog(mLog, new DataCallback() {
                     @Override
                     public void call(Object o, Throwable err) {
                         try {
                             if (err != null) {
-                                LogUtil.e(getClass().getSimpleName(), "cloud log err. %s", LogUtil.getStackTraceString(err));
+                                LogUtil.e(getClass().getSimpleName(), "异常上报失败. %s", LogUtil.getStackTraceString(err));
                             } else {
                                 new Thread(() -> {
                                     Looper.prepare();
-                                    Toast.makeText(getBaseContext(), "闪退异常上报成功", Toast.LENGTH_LONG).show();
+                                    UiUtils.showToast("闪退异常上报成功");
                                     Looper.loop();
                                 }).start();
                                 Thread.sleep(2000);

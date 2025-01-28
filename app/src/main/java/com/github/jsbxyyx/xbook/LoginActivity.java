@@ -11,6 +11,7 @@ import com.github.jsbxyyx.xbook.common.Common;
 import com.github.jsbxyyx.xbook.common.DataCallback;
 import com.github.jsbxyyx.xbook.common.SPUtils;
 import com.github.jsbxyyx.xbook.common.SessionManager;
+import com.github.jsbxyyx.xbook.common.UiUtils;
 import com.github.jsbxyyx.xbook.data.BookNetHelper;
 
 /**
@@ -37,12 +38,15 @@ public class LoginActivity extends AppCompatActivity {
         findViewById(R.id.btn_login).setOnClickListener((v) -> {
             String user = et_login_user.getText().toString();
             String password = et_login_password.getText().toString();
+            LoadingDialog loading = new LoadingDialog(this);
+            loading.show();
             bookNetHelper.login(user, password, new DataCallback<String>() {
                 @Override
                 public void call(String str, Throwable err) {
                     runOnUiThread(() -> {
+                        loading.dismiss();
                         if (err != null) {
-                            Toast.makeText(getBaseContext(), "登录失败 : " + err.getMessage(), Toast.LENGTH_LONG).show();
+                            UiUtils.showToast("登录失败 : " + err.getMessage());
                             return;
                         }
                         SessionManager.setSession(str);
